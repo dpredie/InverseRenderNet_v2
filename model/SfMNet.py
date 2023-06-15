@@ -5,7 +5,7 @@ import tf_slim as slim
 import numpy as np
 #import tfa.layers as layers
 #import tf.contrib.layers as layers
-import slim.layers as layers
+from tensorflow.python.keras.layers import Input, Dense
 import os
 from model import pred_illuDecomp_layer_new as pred_illuDecomp_layer
 
@@ -115,7 +115,7 @@ def SfMNet(
             am_deconv_out = tf.concat([am_deconv_out, tmp], axis=-1)
         elif i == deconv_layers:
             # no normalisation and activation, which is placed at the end
-            am_deconv_out = layers.conv2d(
+            am_deconv_out = layers.Conv2d(
                 am_deconv_out,
                 num_outputs=f_out,
                 kernel_size=[3, 3],
@@ -126,7 +126,7 @@ def SfMNet(
                 weights_initializer=tf.random_normal_initializer(
                     mean=0, stddev=np.sqrt(2 / 9 / f_in)
                 ),
-                weights_regularizer=layers.l2_regularizer(scale=1e-5),
+                weights_regularizer=tf.keras.regularizers.L2(scale=1e-5),
                 scope=scope,
             )
         else:
@@ -148,7 +148,7 @@ def SfMNet(
             nm_deconv_out = tf.concat([nm_deconv_out, tmp], axis=-1)
         elif i == deconv_layers:
             # no normalisation and activation, which is placed at the end
-            nm_deconv_out = layers.conv2d(
+            nm_deconv_out = layers.Conv2d(
                 nm_deconv_out,
                 num_outputs=f_out,
                 kernel_size=[3, 3],
@@ -159,7 +159,7 @@ def SfMNet(
                 weights_initializer=tf.random_normal_initializer(
                     mean=0, stddev=np.sqrt(2 / 9 / f_in)
                 ),
-                weights_regularizer=layers.l2_regularizer(scale=1e-5),
+                weights_regularizer=tf.keras.regularizers.L2(scale=1e-5),
                 biases_initializer=None,
                 scope=scope,
             )
@@ -185,7 +185,7 @@ def SfMNet(
             mask_deconv_out = tf.concat([mask_deconv_out, tmp], axis=-1)
         elif i == deconv_layers:
             # no normalisation and activation, which is placed at the end
-            mask_deconv_out = layers.conv2d(
+            mask_deconv_out = layers.Conv2d(
                 mask_deconv_out,
                 num_outputs=f_out,
                 kernel_size=[3, 3],
@@ -196,7 +196,7 @@ def SfMNet(
                 weights_initializer=tf.random_normal_initializer(
                     mean=0, stddev=np.sqrt(2 / 9 / f_in)
                 ),
-                weights_regularizer=layers.l2_regularizer(scale=1e-5),
+                weights_regularizer=tf.keras.regularizers.L2(scale=1e-5),
                 scope=scope,
             )
         else:
@@ -252,7 +252,7 @@ def group_norm(inputs, scope="group_norm"):
             dtype=tf.float32,
             initializer=tf.ones_initializer(),
             trainable=True,
-            regularizer=layers.l2_regularizer(scale=1e-5),
+            regularizer=tf.keras.regularizers.L2(scale=1e-5),
         )
 
         beta = tf.get_variable(
@@ -261,7 +261,7 @@ def group_norm(inputs, scope="group_norm"):
             dtype=tf.float32,
             initializer=tf.zeros_initializer(),
             trainable=True,
-            regularizer=layers.l2_regularizer(scale=1e-5),
+            regularizer=tf.keras.regularizers.L2(scale=1e-5),
         )
 
         inputs = tf.reshape(inputs, [-1, H, W, group, C // group], name="unpack")
@@ -274,7 +274,7 @@ def group_norm(inputs, scope="group_norm"):
 
 
 def conv2d(inputs, scope, f_in, f_out):
-    conv_out = layers.conv2d(
+    conv_out = layers.Conv2d(
         inputs,
         num_outputs=f_out,
         kernel_size=[3, 3],
@@ -285,7 +285,7 @@ def conv2d(inputs, scope, f_in, f_out):
         weights_initializer=tf.random_normal_initializer(
             mean=0, stddev=np.sqrt(2 / 9 / f_in)
         ),
-        weights_regularizer=layers.l2_regularizer(scale=1e-5),
+        weights_regularizer=tf.keras.regularizers.L2(scale=1e-5),
         biases_initializer=None,
         scope=scope,
     )
