@@ -1,7 +1,8 @@
 import importlib
 import tensorflow as tf
+import tensorflow_addons as tfa
 import numpy as np
-import tensorflow.contrib.layers as layers
+import tfa.layers as layers
 import os
 from model import pred_illuDecomp_layer_new as pred_illuDecomp_layer
 
