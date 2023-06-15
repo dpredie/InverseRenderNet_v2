@@ -4,7 +4,7 @@ import json
 import os
 import numpy as np
 import tensorflow as tf
-#import tensorflow_addons as tfa
+import tf_slim as slim
 import shutil
 import cv2
 from skimage import io
