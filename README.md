@@ -4,7 +4,7 @@ Use conda and install all dependencies below
 
 use the following commands in your conda env:
 
-python video.py --input <path>/<file>.mp4 --fps <fps> --output <path>/
+python video.py --input (path)/(file).mp4 --fps (fps) --output (path)/
 
 
 
