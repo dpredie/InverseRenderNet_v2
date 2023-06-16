@@ -1,3 +1,13 @@
+### How to use with video
+
+Use conda and install all dependencies below
+
+use the following commands in your conda env:
+
+python video.py --input <path>/<file>.mp4 --fps <fps> --output <path>/
+
+
+
 # Outdoor inverse rendering from a single image using multiview self-supervision
 
 Y. Yu and W. Smith, "Outdoor inverse rendering from a single image using multiview self-supervision" in IEEE Transactions on Pattern Analysis & Machine Intelligence
@@ -16,7 +26,7 @@ To run our evaluation code, please create your environment based on following de
 
 * tensorflow 1.12.0
 * python 3.6
-* skimage
+* scikit-image
 * cv2
 * numpy
 
@@ -45,6 +55,7 @@ InverseRenderNet_v2
 │        model.ckpt.index
 │        ...
 ```
+
 
 ### Test on demo image
 
