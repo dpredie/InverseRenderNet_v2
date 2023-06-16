@@ -2,6 +2,8 @@ import ipdb
 from tqdm import tqdm
 import json
 import os
+import warnings
+warnings.simplefilter(action='ignore', category=FutureWarning)
 import numpy as np
 import tensorflow as tf
 import shutil
@@ -17,24 +19,34 @@ parser = argparse.ArgumentParser(description="InverseRenderNet++")
 parser.add_argument(
     "--mode",
     type=str,
-    default="singleframe",
-    choices=["singleframe","demo_im", "iiw", "diode"],
+    default="video",
+    choices=["singleframe","demo_im", "iiw", "diode","video"],
     help="testing mode",
 )
+
+parser.add_argument(
+    "--model",
+    type=str,
+    default="model_ckpt",
+    choices=["model_ckpt","diode_model_ckpt", "iiw_model_ckpt"],
+    help="model option",
+)
+
+parser.add_argument(
+    "--fps",
+    type=int,
+    default=30,
+    help="fps",
+)
+
+#python video.py --input <path>/<file>.mp4 --fps <fps> --output <path>/
 
 # test demo image
 parser.add_argument("--image", type=str, default=None, help="Path to test image")
 parser.add_argument("--mask", type=str, default=None, help="Path to image mask")
-# test iiw
-parser.add_argument(
-    "--iiw", type=str, default=None, help="Root directory for iiw-dataset"
-)
-# test diode
-parser.add_argument(
-    "--diode", type=str, default=None, help="Root directory for iiw-dataset"
-)
-# model and output path
-parser.add_argument("--model", type=str, required=True, help="Path to trained model")
+
+# input and output path
+parser.add_argument("--input", type=str, required=True, help="Video File Input")
 parser.add_argument("--output", type=str, required=True, help="Folder saving outputs")
 args = parser.parse_args()
 
@@ -55,10 +67,11 @@ def srgb_to_rgb(srgb):
 
 def irn_func(input_height, input_width):
     # define inputs
+
     inputs_var = tf.placeholder(tf.float32, (None, input_height, input_width, 3))
     masks_var = tf.placeholder(tf.float32, (None, input_height, input_width, 1))
     train_flag = tf.placeholder(tf.bool, ())
-
+  
     albedos, shadow, nm_pred = SfMNet.SfMNet(
         inputs=inputs_var,
         is_training=train_flag,
@@ -69,7 +82,8 @@ def irn_func(input_height, input_width):
         n_pools=4,
         depth_base=32,
     )
-
+  
+    
     gamma = tf.constant(2.2)
     lightings, _ = SfMNet.comp_light(
         inputs_var, albedos, nm_pred, shadow, gamma, masks_var
@@ -79,7 +93,7 @@ def irn_func(input_height, input_width):
     albedos = rescale_2_zero_one(albedos) * masks_var
     shadow = rescale_2_zero_one(shadow)
     inputs = rescale_2_zero_one(inputs_var) * masks_var
-
+ 
     # visualise lighting on a sphere
     num_rendering = tf.shape(lightings)[0]
     nm_sphere = tf.constant(render_sphere_nm(100, 1), dtype=tf.float32)
@@ -105,6 +119,32 @@ def irn_func(input_height, input_width):
         train_flag,
     )
 
+
+
+def post_process_albedo_nm(
+    albedos_val,
+    nm_pred_val,
+    ori_width,
+    ori_height,
+    resize=False,
+):
+    # post-process results
+    results = {}
+
+    if resize:
+        results.update(
+            dict(albedos=cv2.resize(albedos_val[0], (ori_width, ori_height)))
+        )
+
+        results.update(
+            dict(nm_pred=cv2.resize(nm_pred_val[0], (ori_width, ori_height)))
+        )
+    else:
+        results.update(dict(albedos=albedos_val[0]))
+
+        results.update(dict(nm_pred=nm_pred_val[0]))
+
+    return results
 
 def post_process(
     albedos_val,
@@ -191,6 +231,18 @@ def rescale_img(img):
         img = cv2.resize(img, (new_img_w, new_img_h))
 
     return img, (img_h, img_w), (new_img_h, new_img_w)
+
+def write_video(filename, output_list, fps):
+    assert (len(output_list) > 0)
+    h, w = output_list[0].shape[0], output_list[0].shape[1]
+    writer = cv2.VideoWriter(filename, cv2.VideoWriter_fourcc(*'mp4v'), fps, (w, h))
+
+    for img in output_list:
+        writer.write(img)
+    writer.release()
+
+    return
+
 
 
 if args.mode == "demo_im":
@@ -284,8 +336,10 @@ elif args.mode == "singleframe":
     img = io.imread(img_path)
     #mask = io.imread(mask_path)
 
-    input_height = 200
-    input_width = 200
+    h, w, c = img.shape
+
+    input_height = h
+    input_width = w
 
     ori_img, (ori_height, ori_width), (input_height, input_width) = rescale_img(img)
 
@@ -354,180 +408,62 @@ elif args.mode == "singleframe":
 
     saving_result(results, dst_dir)
     
+elif args.mode == "video":
+    assert args.input is not None and args.output is not None 
+
+    fps = args.fps
+    videofile = args.input
+    # get input
+    #path_lists, scene_names = load_video_paths(args)
+
+    # prepare output folder
+    #os.makedirs(args.output, exist_ok=True)
     
-elif args.mode == "iiw":
-    assert args.iiw is not None
-
-    input_height = 200
-    input_width = 200
-
-    (
-        albedos,
-        shadow,
-        nm_pred,
-        lighting_recon,
-        shading,
-        inputs,
-        inputs_var,
-        masks_var,
-        train_flag,
-    ) = irn_func(input_height, input_width)
-
-    # load model and run session
-    model_path = tf.train.get_checkpoint_state(args.model).model_checkpoint_path
-    sess = tf.InteractiveSession()
-    saver = tf.train.Saver()
-    saver.restore(sess, model_path)
-
+    model_path = tf.train.get_checkpoint_state(args.model).model_checkpoint_path    
     # evaluation
     dst_dir = args.output
     if os.path.isdir(dst_dir):
         shutil.rmtree(dst_dir, ignore_errors=True)
     os.makedirs(dst_dir)
+        
+    cap = cv2.VideoCapture(videofile)
 
-    iiw = args.iiw
+    output_albedo_list = []
+    output_nm_list = []
+    i = 1
+    while (cap.isOpened()):
+        tf.reset_default_graph()
+        # Capture frame-by-frame
+        ret, frame = cap.read()
+        #frame = cv2.resize(frame, (540, 380), fx = 0, fy = 0, interpolation = cv2.INTER_CUBIC)
 
-    test_ids = np.load("utils/iiw_test_ids.npy")
+        if not ret:
+            print("Can't receive frame (stream end?). Exiting ...")
+            break
+     
+     
+        if frame is not None:     
+            # Display the resulting frame
+            #cv2.imshow('Frame', frame)
 
-    total_loss = 0
-    for counter, test_id in enumerate(tqdm(test_ids)):
-        img_file = str(test_id) + ".png"
-        judgement_file = str(test_id) + ".json"
+            # START PROCESS
+            # read in images
 
-        img_path = os.path.join(iiw, "imgs", img_file)
-        judgement_path = os.path.join(iiw, "jsons", judgement_file)
+            img = frame
+            #mask = io.imread(mask_path)
 
-        img = io.imread(img_path)
-        judgement = json.load(open(judgement_path))
+            h, w, c = img.shape
 
-        ori_img = img
-        ori_height, ori_width = ori_img.shape[:2]
-        img = cv2.resize(img, (input_width, input_height))
-        img = np.float32(img) / 255.0
-        img = img * 2.0 - 1.0
-        img = img[None, :, :, :]
-        mask = np.ones((1, input_height, input_width, 1), np.bool)
-
-        [
-            albedos_val,
-            nm_pred_val,
-            shadow_val,
-            lighting_recon_val,
-            shading_val,
-            inputs_val,
-        ] = sess.run(
-            [albedos, nm_pred, shadow, lighting_recon, shading, inputs],
-            feed_dict={inputs_var: img, masks_var: mask, train_flag: False},
-        )
-
-        # results folder for current scn
-        result_dir = os.path.join(dst_dir, img_file[:-4])
-        os.makedirs(result_dir, exist_ok=True)
-
-        # post-process results
-        results = post_process(
-            albedos_val,
-            shading_val,
-            shadow_val,
-            lighting_recon_val,
-            nm_pred_val,
-            ori_width,
-            ori_height,
-        )
-
-        results["img"] = ori_img
-        results["shading"] *= results["shadow"][..., None]
-        results["nm_pred"] = (results["nm_pred"] + 1.0) / 2.0
-
-        results["albedos"] = results["albedos"] ** (1 / 2.2)
-
-        loss = compute_whdr(results["albedos"], judgement)
-        total_loss += loss
-        # print(f"{result_dir:s}\t\t{loss:f}  {total_loss:f}")
-
-        saving_result(results, result_dir)
-
-    print("IIW TEST WHDR %f" % (total_loss / len(test_ids)))
+            input_height = h
+            input_width = w
 
 
-elif args.mode == "diode":
-    assert args.diode is not None
+            #print(" input_height : " , input_height)
+            #print(" input_width : " , input_width)
 
-    last_height = None
-    last_width = None
+            ori_img, (ori_height, ori_width), (input_height, input_width) = rescale_img(img)
 
-    diode = args.diode
-    test_root_dir = os.path.join(diode, "depth", "val")
-    test_nm_root_dir = os.path.join(diode, "normal", "val")
-
-    from glob import glob
-
-    test_scenes_nm_dir = sorted(
-        glob(os.path.join(test_nm_root_dir, "outdoor", "scene*", "scan*"))
-        + glob(os.path.join(test_nm_root_dir, "indoor", "scene*", "scan*"))
-    )
-
-    test_normals_path = np.concatenate(
-        [
-            sorted(glob(os.path.join(t_sc_dir, "*_normal.npy")))
-            for t_sc_dir in test_scenes_nm_dir
-        ],
-        axis=0,
-    )
-    test_imgs_path = np.stack(
-        [
-            tmp.replace("/normal/", "/depth/").replace("_normal.npy", ".png")
-            for tmp in test_normals_path
-        ],
-        axis=0,
-    )
-    test_masks_path = np.stack(
-        [
-            tmp.replace("/normal/", "/depth/").replace("_normal.npy", "_depth_mask.npy")
-            for tmp in test_normals_path
-        ],
-        axis=0,
-    )
-    test_depths_path = np.stack(
-        [
-            tmp.replace("/normal/", "/depth/").replace("_normal.npy", "_depth.npy")
-            for tmp in test_normals_path
-        ],
-        axis=0,
-    )
-
-    total_angErr_list = []
-    for i, (img_path, mask_path, nm_gt_path) in enumerate(
-        zip(tqdm(test_imgs_path), test_masks_path, test_normals_path)
-    ):
-
-        im_id = os.path.split(img_path)[1].split(".")[0]
-        cur_dir = os.path.split(img_path)[0]
-        cur_dir = cur_dir.split("/val/")[1]
-
-        # results folder
-        dst_dir = args.output
-        if os.path.isdir(dst_dir):
-            shutil.rmtree(dst_dir, ignore_errors=True)
-        os.makedirs(dst_dir)
-
-        # load im and gts
-        img = io.imread(img_path)
-        ori_img = img
-        img = np.float32(ori_img) / 255.0
-        img = img * 2.0 - 1.0
-
-        mask = np.load(mask_path)
-        nm_gt = np.load(nm_gt_path)
-
-        img, (ori_height, ori_width), (input_height, input_width) = rescale_img(img)
-        img_mask, (_, _), (_, _) = rescale_img(mask)
-        nm_gt, (_, _), (_, _) = rescale_img(nm_gt)
-
-        img = img[None, :, :, :]
-        img_mask = img_mask[None, :, :, None] != 0.0
-
-        if input_height != last_height or input_width != last_width:
+            # run inverse rendering
             (
                 albedos,
                 shadow,
@@ -540,56 +476,83 @@ elif args.mode == "diode":
                 train_flag,
             ) = irn_func(input_height, input_width)
 
-            if last_height is None and last_width is None:
-                model_path = tf.train.get_checkpoint_state(
-                    args.model
-                ).model_checkpoint_path
-                sess = tf.InteractiveSession()
-                saver = tf.train.Saver()
-                saver.restore(sess, model_path)
+            # load model and run session
 
-            last_height = input_height
-            last_width = input_width
+            sess = tf.InteractiveSession()
+            saver = tf.train.Saver()
+            saver.restore(sess, model_path)
 
-        [
-            albedos_val,
-            nm_pred_val,
-            shadow_val,
-            lighting_recon_val,
-            shading_val,
-            inputs_val,
-        ] = sess.run(
-            [albedos, nm_pred, shadow, lighting_recon, shading, inputs],
-            feed_dict={inputs_var: img, masks_var: img_mask, train_flag: False},
-        )
 
-        # results folder for current scn
-        cur_dst_dir = os.path.join(dst_dir, cur_dir)
-        os.makedirs(cur_dst_dir, exist_ok=True)
 
-        # post-process results
-        results = post_process(
-            albedos_val,
-            shading_val,
-            shadow_val,
-            lighting_recon_val,
-            nm_pred_val,
-            ori_width,
-            ori_height,
-            resize=False,
-        )
+            imgs = np.float32(ori_img) / 255.0
+            imgs = srgb_to_rgb(imgs)
+            imgs = imgs * 2.0 - 1.0
+            imgs = imgs[None]
+            #mask = cv2.resize(mask, (input_width, input_height), cv2.INTER_NEAREST)
+            img_masks = np.ones((1, input_height, input_width, 1), np.bool)
+            imgs *= img_masks
+            [
+                albedos_val,
+                nm_pred_val,
+                shadow_val,
+                lighting_recon_val,
+                shading_val,
+                inputs_val,
+            ] = sess.run(
+                [albedos, nm_pred, shadow, lighting_recon, shading, inputs],
+                feed_dict={inputs_var: imgs, masks_var: img_masks, train_flag: False},
+            )
 
-        angErr_list = angular_error(nm_gt, results["nm_pred"])
-        # print(f"{i:d}  {angErr_list.mean():f}")
+            # post-process results
+            results = post_process_albedo_nm(
+                albedos_val,
+                nm_pred_val,
+                ori_width,
+                ori_height,
+            )
 
-        total_angErr_list.append(angErr_list)
-        total_angErr_list = [np.concatenate(total_angErr_list, -1)]
+            # rescale albedo and normal
+            results["albedos"] = (results["albedos"] - results["albedos"].min()) / (
+                results["albedos"].max() - results["albedos"].min()
+            )
 
-        results["img"] = cv2.resize(ori_img, (input_width, input_height))
-        results["nm_pred"] = (results["nm_pred"] + 1.0) / 2.0
+            results["nm_pred"] = (results["nm_pred"] + 1.0) / 2.0
+            results["img"] = img
 
-        saving_result(results, cur_dst_dir, prefix=im_id)
+            # save output
+            #output_albedo_name = os.path.join(args.output, scene_names[i] + '.mp4')
+            #output_nm_name = os.path.join(args.output, scene_names[i] + '.mp4')
 
-    print(
-        f"DIODE TEST: mean={np.mean(total_angErr_list):f}  median={np.median(total_angErr_list):.4f}"
-    )
+            albedos = np.uint8(results["albedos"] * 255.0)
+            nm_pred = np.uint8(results["nm_pred"] * 255.0)
+            
+            output_albedo_list.append(albedos)
+            output_nm_list.append(nm_pred)
+            print(" Processing : " , i)
+            i +=1
+
+        
+        
+        # END PROCESS
+        
+        # define q as the exit button
+        if cv2.waitKey(25) & 0xFF == ord('q'):
+            break
+     
+    # release the video capture object
+    cap.release()
+    output_albedo_name = os.path.join(args.output, 'albedo.mp4')
+    output_nm_name = os.path.join(args.output, 'normals.mp4')
+    
+    print(" Writing: " + output_albedo_name)
+    write_video(output_albedo_name,output_albedo_list,fps)
+    
+    print(" Writing: " + output_nm_name)
+    write_video(output_nm_name,output_nm_list,fps)    
+    # Closes all the windows currently opened.
+    cv2.destroyAllWindows()    
+    print(" DONE: ")
+    sess.close()
+
+    
+    
